@@ -1,0 +1,279 @@
+index.html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Linea Airdrop Checker — Read-only</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{--bg:#071018;--card:#0e1a24;--accent:#19d3a6;--muted:#9bb7c8;color-scheme:dark}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#04101a 0%,#061622 100%);color:#d7f3ee}
+    .wrap{max-width:980px;margin:32px auto;padding:20px}
+    header{display:flex;align-items:center;gap:16px;margin-bottom:18px}
+    header h1{margin:0;font-size:22px;color:var(--accent)}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .card{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);padding:14px;border-radius:10px;box-shadow:0 6px 18px rgba(2,10,14,0.5)}
+    .card.full{width:100%}
+    .card.wide{flex:1;min-width:360px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type=text],textarea,select{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.01);color:inherit}
+    button{background:var(--accent);color:#022024;border:0;padding:10px 14px;border-radius:8px;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#cfe7ff}
+    .muted{color:var(--muted);font-size:13px}
+    .log{font-family:monospace;background:rgba(0,0,0,0.15);padding:10px;border-radius:8px;color:#cfe7ff;max-height:260px;overflow:auto}
+    .token-row{display:flex;gap:12px;align-items:center;padding:8px;border-radius:8px;border-bottom:1px dashed rgba(255,255,255,0.03)}
+    .token-name{min-width:180px;flex:1}
+    .badge{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:6px;font-weight:600}
+    .warning{background:#3a1e12;color:#ffd9cc;padding:8px;border-radius:8px;margin-bottom:10px}
+    footer{margin-top:18px;color:var(--muted);font-size:13px}
+    @media(max-width:700px){.row{flex-direction:column}.card.wide{min-width:unset}}
+  </style>
+  <!-- ethers v6 UMD bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Linea Airdrop Checker — Read-only</h1>
+      <div class="muted">Check balances safely — never paste private keys.</div>
+    </header>
+
+    <div class="row">
+      <div class="card wide">
+        <div style="display:flex;gap:10px;align-items:center;justify-content:space-between">
+          <div>
+            <div class="muted">Read-only Linea RPC</div>
+            <div id="rpcUrl" class="muted">https://rpc.linea.build</div>
+          </div>
+          <div style="text-align:right">
+            <button id="connectBtn">Connect Wallet (MetaMask)</button>
+            <button id="disconnectBtn" class="ghost" style="display:none">Disconnect</button>
+          </div>
+        </div>
+
+        <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)">
+
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:240px">
+            <label>Connected address (injected)</label>
+            <div id="injectedAddress" class="muted">Not connected</div>
+            <label style="margin-top:8px">ETH (injected provider)</label>
+            <div id="injectedEth" class="muted">-</div>
+          </div>
+
+          <div style="flex:1;min-width:240px">
+            <label>Address to check (read-only)</label>
+            <input id="manualAddress" type="text" placeholder="Paste an address to inspect (or leave blank to use injected)" />
+            <div style="margin-top:8px" class="muted">If blank, the connected wallet address will be used (read-only checks).</div>
+            <div style="margin-top:8px">
+              <button id="checkReadOnly">Check Read-only Balance</button>
+            </div>
+            <div style="margin-top:8px" class="muted">ETH (via Read-only RPC): <span id="rpcEth">-</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="min-width:280px">
+        <label>ERC-20 token contracts to check</label>
+        <textarea id="tokensInput" rows="6" placeholder="Paste token contract addresses (Linea) - separated by comma or newline. Example:
+0x... , 0x..."></textarea>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button id="checkTokensBtn">Check Tokens for Selected Address</button>
+          <button id="clearLog" class="ghost">Clear Log</button>
+        </div>
+        <div style="margin-top:10px" class="muted">Token USD price lookup: best-effort using CoinGecko (works for many tokens on Ethereum mainnet; Linea-specific prices may not be available).</div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px" class="card full">
+      <label>Results / Logs</label>
+      <div id="logs" class="log"></div>
+    </div>
+
+    <footer>
+      <div class="warning">
+        <strong>Warning:</strong> This page is strictly read-only. <b>Never</b> paste private keys or seed phrases. Do not approve suspicious network additions in MetaMask. If a wallet was compromised, consider it permanently compromised.
+      </div>
+      <div class="muted">Built to help check balances quickly for manual airdrop verification. This tool does not transfer tokens.</div>
+    </footer>
+  </div>
+
+<script>
+(async () => {
+  const ethers = window.ethers;
+  if (!ethers) {
+    alert('ethers.js not loaded. Open the page with internet access.');
+    return;
+  }
+
+  // --- CONFIG ---
+  const LINEA_RPC = 'https://rpc.linea.build'; // read-only public RPC (replace if you prefer another)
+  const rpcProvider = new ethers.JsonRpcProvider(LINEA_RPC, 59140); // Linea chainId 59140 (update if needed)
+  const MIN_LOG_LEVEL = 0;
+
+  // --- DOM ---
+  const connectBtn = document.getElementById('connectBtn');
+  const disconnectBtn = document.getElementById('disconnectBtn');
+  const injectedAddressEl = document.getElementById('injectedAddress');
+  const injectedEthEl = document.getElementById('injectedEth');
+  const manualAddressInput = document.getElementById('manualAddress');
+  const rpcEthEl = document.getElementById('rpcEth');
+  const checkReadOnlyBtn = document.getElementById('checkReadOnly');
+  const tokensInput = document.getElementById('tokensInput');
+  const checkTokensBtn = document.getElementById('checkTokensBtn');
+  const logsEl = document.getElementById('logs');
+  const clearLogBtn = document.getElementById('clearLog');
+
+  function log(...args) {
+    const time = new Date().toLocaleTimeString();
+    const line = '[' + time + '] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    logsEl.innerText = line + "\\n" + logsEl.innerText;
+  }
+
+  clearLogBtn.addEventListener('click', () => logsEl.innerText = '');
+
+  // --- Injected provider (MetaMask) management ---
+  let injectedProvider = null;
+  let injectedSigner = null;
+  let connectedAddr = null;
+
+  async function connectInjected() {
+    if (!window.ethereum) {
+      alert('MetaMask (or another injected wallet) not found in this browser.');
+      return;
+    }
+    try {
+      await window.ethereum.request({ method: 'eth_requestAccounts' });
+      injectedProvider = new ethers.BrowserProvider(window.ethereum);
+      injectedSigner = await injectedProvider.getSigner();
+      connectedAddr = await injectedSigner.getAddress();
+      injectedAddressEl.innerText = connectedAddr;
+      disconnectBtn.style.display = 'inline-block';
+      connectBtn.style.display = 'none';
+      log('Connected injected wallet:', connectedAddr);
+      await refreshInjectedBalance();
+      // watch account / network changes
+      window.ethereum.on && window.ethereum.on('accountsChanged', async () => {
+        try { connectedAddr = await injectedSigner.getAddress(); injectedAddressEl.innerText = connectedAddr; log('accountsChanged:', connectedAddr); } catch(e){ injectedAddressEl.innerText = 'Not connected'; }
+      });
+      window.ethereum.on && window.ethereum.on('chainChanged', (c) => { log('chainChanged', c); });
+    } catch (e) {
+      log('Connect request rejected or failed:', e.message || e);
+    }
+  }
+
+  function disconnectInjected() {
+    // for injected wallets we can't "disconnect" programmatically; just clear UI
+    injectedProvider = null;
+    injectedSigner = null;
+    connectedAddr = null;
+    injectedAddressEl.innerText = 'Not connected';
+    injectedEthEl.innerText = '-';
+    disconnectBtn.style.display = 'none';
+    connectBtn.style.display = 'inline-block';
+    log('UI: disconnected injected provider (note: wallet extension still has session).');
+  }
+
+  async function refreshInjectedBalance() {
+    if (!injectedSigner) return;
+    try {
+      const balance = await injectedSigner.getBalance();
+      injectedEthEl.innerText = ethers.formatEther(balance) + ' ETH';
+      log('Injected balance:', ethers.formatEther(balance));
+    } catch (e) {
+      injectedEthEl.innerText = 'error';
+      log('Injected balance error:', e.message || e);
+    }
+  }
+
+  connectBtn.addEventListener('click', connectInjected);
+  disconnectBtn.addEventListener('click', disconnectInjected);
+
+  // --- Read-only RPC balance check ---
+  async function checkReadOnlyBalance() {
+    const address = (manualAddressInput.value || connectedAddr || '').trim();
+    if (!address) { alert('Enter an address or connect a wallet'); return; }
+    try {
+      // Validate address
+      const addr = ethers.getAddress(address);
+      const bal = await rpcProvider.getBalance(addr);
+      rpcEthEl.innerText = ethers.formatEther(bal) + ' ETH';
+      log('Read-only RPC balance for', addr, '→', ethers.formatEther(bal));
+    } catch (e) {
+      rpcEthEl.innerText = 'error';
+      log('Read-only balance error:', e.message || e);
+      alert('Read-only check failed: ' + (e.message || e));
+    }
+  }
+
+  checkReadOnlyBtn.addEventListener('click', checkReadOnlyBalance);
+
+  // --- ERC-20 token checks ---
+  const ERC20_ABI = [
+    "function balanceOf(address) view returns (uint256)",
+    "function decimals() view returns (uint8)",
+    "function symbol() view returns (string)"
+  ];
+
+  async function checkTokensForAddress() {
+    const address = (manualAddressInput.value || connectedAddr || '').trim();
+    if (!address) { alert('Enter an address or connect wallet'); return; }
+
+    // parse tokens input
+    const raw = tokensInput.value.trim();
+    if (!raw) { alert('Paste one or more token contract addresses first'); return; }
+    const tokens = raw.split(/[,\\n\\s]+/).map(s => s.trim()).filter(Boolean);
+    log('Checking', tokens.length, 'token(s) for', address);
+
+    for (const t of tokens) {
+      try {
+        const tokenAddr = ethers.getAddress(t);
+        const token = new ethers.Contract(tokenAddr, ERC20_ABI, rpcProvider);
+        // fetch info
+        let symbol='TOKEN', decimals=18, bal=0n;
+        try { symbol = await token.symbol(); } catch(e){ symbol='TOKEN'; }
+        try { decimals = await token.decimals(); } catch(e){ decimals = 18; }
+        try { bal = await token.balanceOf(address); } catch(e){ bal = 0n; }
+        const formatted = ethers.formatUnits(bal, decimals);
+        // try to fetch USD price via CoinGecko (best-effort using ethereum mainnet contract lookup)
+        let usd = null;
+        try {
+          // CoinGecko token price endpoint (works for many mainnet tokens)
+          const cgResp = await fetch('https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=' + tokenAddr + '&vs_currencies=usd');
+          if (cgResp.ok) {
+            const j = await cgResp.json();
+            const key = tokenAddr.toLowerCase();
+            if (j && j[key] && j[key].usd) usd = j[key].usd;
+          }
+        } catch(e){ /* ignore */ }
+
+        log(`${symbol} (${tokenAddr}) → ${formatted} ${symbol}` + (usd!==null ? ` ≈ $${usd}` : ' — price unknown'));
+      } catch (e) {
+        log('Invalid token address:', t, (e && e.message) ? e.message : e);
+      }
+    }
+  }
+
+  checkTokensBtn.addEventListener('click', checkTokensForAddress);
+
+  // --- Auto show rpc info on load ---
+  (async function showInitial() {
+    try {
+      const bn = await rpcProvider.getBlockNumber();
+      log('Read-only RPC is online. Block:', bn);
+    } catch (e) {
+      log('Read-only RPC error:', e.message || e);
+    }
+  })();
+
+  // helpful keyboard shortcuts: Ctrl+Enter runs token check
+  window.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+      checkTokensForAddress();
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
