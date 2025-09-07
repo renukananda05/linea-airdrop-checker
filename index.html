@@ -1,386 +1,139 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Linea Airdrop Checker — Token Scanner</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="description" content="Linea token/ETH read-only checker. Never paste private keys." />
-  <style>
-    :root{
-      --bg:#071018; --panel:#07181f; --muted:#9fb6c6; --accent:#1dd1a1; --card:#071b22;
-      --danger:#ff6b6b; --glass: rgba(255,255,255,0.03);
-      font-family: Inter,system-ui,Arial,Helvetica;
-    }
-    body{background:linear-gradient(180deg,#041018 0%, #071018 100%); color:#cfe7ff; margin:0; padding:24px;}
-    .wrap{max-width:980px;margin:12px auto;padding:20px;background:var(--glass);border-radius:12px;box-shadow:0 6px 26px rgba(0,0,0,0.6);}
-    h1{margin:0 0 8px;font-size:26px;color:var(--accent)}
-    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    .col{flex:1;min-width:280px}
-    button{background:linear-gradient(180deg,#14b98a,#0aa56f);border:0;color:#05221b;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer}
-    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
-    .small{font-size:13px;color:var(--muted)}
-    pre{background:#020708;padding:12px;border-radius:8px;overflow:auto;color:#a6e3c7}
-    label{display:block;margin-bottom:6px;font-size:13px;color:var(--muted)}
-    input, textarea{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:#dff3ff}
-    .tokens{margin-top:16px}
-    .token{display:flex;justify-content:space-between;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);margin-bottom:8px}
-    .muted{color:var(--muted)}
-    .danger{color:var(--danger)}
-    .note{font-size:13px;color:var(--muted);margin-top:12px}
-    .flex{display:flex;gap:10px;align-items:center}
-  </style>
-  <!-- ethers v6 (minified) CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/ethers@6.9.0/dist/ethers.min.js"></script>
-</head>
-<body>
-  <div class="wrap">
-    <h1>Linea Airdrop Checker — Token Scanner (read-only)</h1>
-    <p class="small">Safe: never paste private keys. This page only reads balances via MetaMask or a public RPC.</p>
-
-    <div class="row" style="margin-top:12px">
-      <div class="col">
-        <div class="small">RPC (read-only fallback)</div>
-        <pre id="rpcUrl">https://rpc.linea.build</pre>
-      </div>
-
-      <div class="col">
-        <div class="small">Status</div>
-        <div id="status" class="muted">Not connected</div>
-      </div>
-
-      <div style="width:260px">
-        <div class="small">Actions</div>
-        <div class="flex" style="margin-top:6px">
-          <button id="btnConnect">Connect Wallet</button>
-          <button id="btnDisconnect" class="btn-ghost">Disconnect</button>
-        </div>
-      </div>
-    </div>
-
-    <hr style="margin:14px 0;border-color:rgba(255,255,255,0.03)"/>
-
-    <div class="row">
-      <div class="col">
-        <label>Connected address (injected)</label>
-        <div id="connectedAddress" class="muted">-</div>
-
-        <label style="margin-top:10px">ETH balance (injected provider)</label>
-        <div id="ethInjected" class="muted">-</div>
-
-        <label style="margin-top:10px">ETH balance (read-only RPC fallback)</label>
-        <div id="ethReadOnly" class="muted">-</div>
-
-        <div class="note">Scan method: the page looks for ERC-20 <code>Transfer(address,address,uint256)</code> logs to detect token contracts that involved this address in the recent block window.</div>
-      </div>
-
-      <div class="col">
-        <label>Address to check (read-only)</label>
-        <input id="manualAddress" placeholder="leave blank to use connected address (read-only)" />
-
-        <label style="margin-top:8px">Scan options</label>
-        <div class="small muted">Block window (how many blocks in past to scan for Transfer logs). Larger = more likely to find tokens but heavier RPC calls.</div>
-        <input id="blockWindow" value="50000" />
-
-        <div style="margin-top:8px" class="flex">
-          <button id="btnReadOnly">Check Read-only Balance</button>
-          <button id="btnScan" class="btn-ghost">Scan tokens (getLogs)</button>
-        </div>
-      </div>
-    </div>
-
-    <hr style="margin:14px 0;border-color:rgba(255,255,255,0.03)"/>
-
-    <div>
-      <label>ERC-20 token contract addresses to check (optional)</label>
-      <textarea id="tokenList" rows="4" placeholder="0x..., 0x...  — if you have specific token contracts paste here"></textarea>
-      <div class="flex" style="margin-top:8px">
-        <button id="btnCheckList">Check listed token addresses</button>
-        <button id="btnClear" class="btn-ghost">Clear results</button>
-      </div>
-    </div>
-
-    <div class="tokens" id="resultsArea"></div>
-
-    <div style="margin-top:12px" class="small muted">
-      ⚠️ This is a read-only tool. If you rely on token discovery for an airdrop claim, always double-check via official sources or an on-chain indexer for completeness.
-    </div>
-  </div>
-
+index.html
 <script>
-(async () => {
-  // CONFIG
-  const LINEA_CHAIN_ID = 59144;             // mainnet chainId
-  const RPC_FALLBACK = document.getElementById('rpcUrl').textContent.trim();
-  const TRANSFER_TOPIC = ethers.id("Transfer(address,address,uint256)");
-
-  // UI elements
-  const btnConnect = document.getElementById('btnConnect');
-  const btnDisconnect = document.getElementById('btnDisconnect');
-  const connectedAddressEl = document.getElementById('connectedAddress');
-  const statusEl = document.getElementById('status');
-  const ethInjectedEl = document.getElementById('ethInjected');
-  const ethReadOnlyEl = document.getElementById('ethReadOnly');
-  const manualAddressEl = document.getElementById('manualAddress');
-  const blockWindowEl = document.getElementById('blockWindow');
-  const btnReadOnly = document.getElementById('btnReadOnly');
-  const btnScan = document.getElementById('btnScan');
-  const tokenListEl = document.getElementById('tokenList');
-  const btnCheckList = document.getElementById('btnCheckList');
-  const resultsArea = document.getElementById('resultsArea');
-  const btnClear = document.getElementById('btnClear');
-
-  // providers
-  let injectedProvider = null;
-  let injectedSigner = null;
-  let fallbackProvider = new ethers.JsonRpcProvider(RPC_FALLBACK, LINEA_CHAIN_ID);
-
-  // small helper to set status
-  function setStatus(txt){ statusEl.textContent = txt; }
-
-  function short(addr){
-    if(!addr) return '-';
-    return addr.slice(0,6)+'...'+addr.slice(-4);
-  }
-
-  function makeTokenEl(sym, addr, formatted, raw){
-    const div = document.createElement('div');
-    div.className = 'token';
-    div.innerHTML = `<div>
-        <div style="font-weight:700">${sym} <span class="muted" style="font-weight:400">(${short(addr)})</span></div>
-        <div class="muted">raw: ${raw.toString()}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-weight:700">${formatted}</div>
-      </div>`;
-    return div;
-  }
-
-  // connect
-  btnConnect.onclick = async () => {
-    if(!window.ethereum){
-      alert("No injected wallet found (MetaMask). Install or use read-only checks.");
-      return;
-    }
-    try{
-      await window.ethereum.request({ method: 'eth_requestAccounts' });
-      injectedProvider = new ethers.BrowserProvider(window.ethereum, "any"); // ethers v6
-      injectedSigner = await injectedProvider.getSigner();
-      const chain = await injectedProvider.send("eth_chainId", []);
-      const chainDec = Number(chain);
-      const addr = await injectedSigner.getAddress();
-
-      connectedAddressEl.textContent = addr;
-      setStatus(`Connected (chainId=${chainDec})`);
-      if(chainDec !== LINEA_CHAIN_ID){
-        setStatus(`Connected to unsupported network (chainId=${chainDec}). Please switch MetaMask to Linea Mainnet (59144).`);
-      }
-      await updateInjectedBalance();
-    } catch(e){
-      console.error(e);
-      setStatus("Connection rejected / failed.");
-    }
+  /**
+   * Ensure the user wallet is on Linea (chainId 59144).
+   * If not present, ask the wallet to add the Linea network.
+   */
+  
+  const LINEA = {
+    chainIdHex: "0xE708", // 59144 decimal -> 0xE708
+    chainIdDec: 59144,
+    chainName: "Linea Mainnet",
+    rpcUrls: ["https://rpc.linea.build"],
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    blockExplorerUrls: ["https://lineascan.build"]
   };
-
-  btnDisconnect.onclick = async () => {
-    injectedProvider = null;
-    injectedSigner = null;
-    connectedAddressEl.textContent = '-';
-    ethInjectedEl.textContent = '-';
-    setStatus("Disconnected");
-  };
-
-  async function updateInjectedBalance(){
-    if(!injectedProvider || !injectedSigner) return;
-    try{
-      const addr = await injectedSigner.getAddress();
-      // get balance via injected provider (MetaMask)
-      const bal = await injectedProvider.getBalance(addr);
-      ethInjectedEl.textContent = `${Number(ethers.formatEther(bal)).toFixed(6)} ETH`;
-      setStatus("Connected and ETH read");
-    } catch(e){
-      console.warn("Injected balance error:", e);
-      ethInjectedEl.textContent = 'error';
+  
+  async function ensureLineaNetwork() {
+    if (!window.ethereum) {
+      console.error("No injected wallet found (window.ethereum). Install MetaMask.");
+      return { ok: false, reason: "no_wallet" };
     }
-  }
-
-  // read-only eth balance using fallback RPC (or injected fallback if address provided)
-  async function checkReadOnly(){
-    resultsArea.innerHTML = '';
-    const manual = (manualAddressEl.value||'').trim();
-    let addrToCheck = manual || (injectedSigner ? await injectedSigner.getAddress() : null);
-    if(!addrToCheck){
-      alert("No address to check. Connect wallet or paste an address in the Address to check input.");
-      return;
-    }
-    setStatus("Reading ETH (read-only)...");
-    try{
-      const bal = await fallbackProvider.getBalance(addrToCheck);
-      ethReadOnlyEl.textContent = `${Number(ethers.formatEther(bal)).toFixed(6)} ETH`;
-      setStatus("Read-only ETH fetched");
-    } catch(e){
-      console.error("read-only balance error:", e);
-      ethReadOnlyEl.textContent = 'error';
-      setStatus("Read-only ETH error (see console)");
-    }
-  }
-
-  btnReadOnly.onclick = checkReadOnly;
-
-  // helper: safe contract calls for ERC20
-  const ERC20_ABI = [
-    "function balanceOf(address) view returns (uint256)",
-    "function decimals() view returns (uint8)",
-    "function symbol() view returns (string)"
-  ];
-
-  async function checkTokenContract(tokenAddr, addrToCheck, provider){
-    try{
-      const token = new ethers.Contract(tokenAddr, ERC20_ABI, provider);
-      const [rawBal, decimals, symbol] = await Promise.all([
-        token.balanceOf(addrToCheck).catch(()=>0n),
-        token.decimals().catch(()=>18),
-        token.symbol().catch(()=>"TOKEN")
-      ]);
-      return { tokenAddr, rawBal: BigInt(rawBal?.toString?.() ?? rawBal ?? 0n), decimals: Number(decimals || 18), symbol };
-    } catch(e){
-      console.warn('token check failed', tokenAddr, e);
-      return null;
-    }
-  }
-
-  // parse token addresses from textarea
-  function parseTokenList(text){
-    if(!text) return [];
-    const parts = text.split(/[\s,]+/).map(s=>s.trim()).filter(Boolean);
-    // basic validation
-    return parts.filter(p => ethers.isAddress(p));
-  }
-
-  // check explicit token list (button)
-  btnCheckList.onclick = async () => {
-    resultsArea.innerHTML = '';
-    const manual = (manualAddressEl.value||'').trim();
-    const addrToCheck = manual || (injectedSigner ? await injectedSigner.getAddress() : null);
-    if(!addrToCheck){
-      alert("No address to check. Connect or paste address.");
-      return;
-    }
-    const tokens = parseTokenList(tokenListEl.value);
-    if(tokens.length === 0){
-      alert("No valid token contracts found in the textarea.");
-      return;
-    }
-    setStatus("Checking token list...");
-    for(const t of tokens){
-      const info = await checkTokenContract(t, addrToCheck, fallbackProvider);
-      if(info && info.rawBal > 0n){
-        const formatted = ethers.formatUnits(info.rawBal, info.decimals);
-        resultsArea.appendChild(makeTokenEl(info.symbol, info.tokenAddr, formatted, info.rawBal));
+  
+    try {
+      // Try to switch to Linea
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: LINEA.chainIdHex }]
+      });
+      console.log("Switched to Linea (already present).");
+      return { ok: true };
+    } catch (switchError) {
+      // 4902 = chain not found in wallet
+      const code = switchError?.code;
+      console.warn("switchEthereumChain failed:", switchError);
+  
+      if (code === 4902) {
+        // Try to add the chain
+        try {
+          await window.ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [{
+              chainId: LINEA.chainIdHex,
+              chainName: LINEA.chainName,
+              rpcUrls: LINEA.rpcUrls,
+              nativeCurrency: LINEA.nativeCurrency,
+              blockExplorerUrls: LINEA.blockExplorerUrls
+            }]
+          });
+          console.log("Linea added to wallet and selected.");
+          return { ok: true };
+        } catch (addError) {
+          console.error("wallet_addEthereumChain failed:", addError);
+          return { ok: false, reason: "add_failed", error: addError };
+        }
       } else {
-        // show zero result (optional)
-        const div = document.createElement('div'); div.className='token';
-        div.innerHTML = `<div class="muted">No balance • ${short(t)}</div><div class="muted">0</div>`;
-        resultsArea.appendChild(div);
+        // Other switch errors (user rejected, network mismatch, etc.)
+        return { ok: false, reason: "switch_failed", error: switchError };
       }
     }
-    setStatus("Token list checked");
-  };
-
-  btnClear.onclick = () => { resultsArea.innerHTML = ''; }
-
-  // SCAN via getLogs for Transfer events
-  btnScan.onclick = async () => {
-    resultsArea.innerHTML = '';
-    const manual = (manualAddressEl.value||'').trim();
-    const addrToCheck = manual || (injectedSigner ? await injectedSigner.getAddress() : null);
-    if(!addrToCheck){
-      alert("No address to check. Connect or paste address.");
-      return;
-    }
-    let windowBlocks = parseInt(blockWindowEl.value || "50000");
-    if(isNaN(windowBlocks) || windowBlocks <= 0) windowBlocks = 50000;
-
-    setStatus(`Scanning last ${windowBlocks.toLocaleString()} blocks for Transfer logs (this may take a moment)...`);
-
-    try{
-      const latest = await fallbackProvider.getBlockNumber();
-      const fromBlock = Math.max(0, latest - windowBlocks);
-      // topic: Transfer(address indexed from, address indexed to, uint256)
-      // We search for logs where either indexed from OR indexed to equals the address. Because topics support only AND logic we will query twice: once for to==addr and once for from==addr and combine results.
-      const addrTopic = ethers.zeroPadValue(addrToCheck, 32);
-
-      const qTo = { fromBlock, toBlock: latest, topics: [TRANSFER_TOPIC, null, addrTopic] };
-      const qFrom = { fromBlock, toBlock: latest, topics: [TRANSFER_TOPIC, addrTopic] };
-
-      // fetch logs (try/catch separately in case of partial failures)
-      let logs = [];
-      try {
-        const logsTo = await fallbackProvider.getLogs(qTo);
-        logs = logs.concat(logsTo);
-      } catch(e) {
-        console.warn("getLogs (to) error:", e);
-      }
-      try {
-        const logsFrom = await fallbackProvider.getLogs(qFrom);
-        logs = logs.concat(logsFrom);
-      } catch(e) {
-        console.warn("getLogs (from) error:", e);
-      }
-
-      // unique contract addresses
-      const tokenAddrs = [...new Set(logs.map(l => l.address))];
-      // if none found, inform user
-      if(tokenAddrs.length === 0){
-        setStatus("No token Transfer logs found in window. Try increasing block window or provide token contracts manually.");
+  }
+  
+  /** Connect wallet and ensure the wallet is on Linea */
+  async function connectWalletAndEnsureLinea() {
+    try {
+      if (!window.ethereum) {
+        alert("No injected wallet found. Install MetaMask or a compatible wallet.");
         return;
       }
-
-      setStatus(`Found ${tokenAddrs.length} token contract(s) from logs. Checking balances...`);
-
-      for(const t of tokenAddrs){
-        // skip ETH pseudo tokens etc
-        const info = await checkTokenContract(t, addrToCheck, fallbackProvider);
-        if(info && info.rawBal > 0n){
-          const formatted = ethers.formatUnits(info.rawBal, info.decimals);
-          resultsArea.appendChild(makeTokenEl(info.symbol, info.tokenAddr, formatted, info.rawBal));
+  
+      // Ensure network first
+      const res = await ensureLineaNetwork();
+      if (!res.ok) {
+        if (res.reason === "no_wallet") {
+          alert("No wallet detected. Install MetaMask.");
+        } else if (res.reason === "add_failed") {
+          alert("Could not add Linea network to your wallet. Check console for details.");
+        } else if (res.reason === "switch_failed") {
+          // If user rejected the network switch, politely notify them
+          alert("Please switch your wallet to the Linea network (59144) and then connect.");
         }
+        console.error("Network ensure result:", res);
+        return;
       }
-
-      setStatus(`Scan complete. Displaying tokens with non-zero balances (from logs).`);
-    } catch(e){
-      console.error("scan error:", e);
-      setStatus("Scan failed — see console for details.");
+  
+      // Request accounts (connect)
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      const addr = accounts && accounts[0];
+      console.log("Connected address:", addr);
+      // Update your UI with the address
+      const el = document.querySelector("#connectedAddress");
+      if (el) el.textContent = addr;
+  
+      // Optionally get chainId and balance:
+      const chainId = await window.ethereum.request({ method: "eth_chainId" });
+      console.log("Current chainId:", chainId);
+  
+      // Try to fetch ETH balance via injected provider
+      try {
+        const balanceHex = await window.ethereum.request({
+          method: "eth_getBalance",
+          params: [addr, "latest"]
+        });
+        const balance = BigInt(balanceHex).toString(); // hex -> bigint string
+        // Format balance in ETH (simple)
+        const eth = Number(BigInt(balanceHex) / 10n ** 18n) + (Number(BigInt(balanceHex) % 10n ** 18n) / 1e18);
+        console.log("Injected ETH balance:", eth);
+        const balEl = document.querySelector("#injectedBalance");
+        if (balEl) balEl.textContent = `${eth} ETH (injected)`;
+      } catch (balErr) {
+        console.warn("Failed to get injected balance:", balErr);
+        const balEl = document.querySelector("#injectedBalance");
+        if (balEl) balEl.textContent = "error";
+      }
+  
+      // Listen for account or network changes and refresh UI appropriately
+      window.ethereum.on && window.ethereum.on("accountsChanged", (accs) => {
+        console.log("accountsChanged", accs);
+        const el = document.querySelector("#connectedAddress");
+        if (el) el.textContent = accs[0] || "Not connected";
+      });
+      window.ethereum.on && window.ethereum.on("chainChanged", (chain) => {
+        console.log("chainChanged", chain);
+        // You may want to reload or re-check balances
+        // window.location.reload();
+      });
+  
+    } catch (err) {
+      console.error("connectWalletAndEnsureLinea error:", err);
+      alert("Connection failed. See console for details.");
     }
-  };
-
-  // quick startup: if injected provider present show status
-  if(window.ethereum){
-    setStatus("Injected wallet detected — click Connect Wallet to authorize");
-  } else {
-    setStatus("No injected wallet detected — you can use read-only RPC to check balances.");
   }
-
-  // convenience: update injected ETH if accounts change
-  if(window.ethereum){
-    window.ethereum.on && window.ethereum.on('accountsChanged', async (accounts) => {
-      if(accounts.length === 0){
-        connectedAddressEl.textContent = '-';
-        ethInjectedEl.textContent = '-';
-        setStatus("Disconnected (accountsChanged)");
-      } else {
-        connectedAddressEl.textContent = accounts[0];
-        await updateInjectedBalance();
-      }
-    });
-    window.ethereum.on && window.ethereum.on('chainChanged', (chainId) => {
-      setStatus(`Network changed (chain ${Number(chainId)}) — reconnect if needed`);
-    });
-  }
-
-  // small helper: if user types manual address, automatically update read-only balance when clicking button
-  // no auto-scan to avoid accidental heavy RPC usage
-
-})();
-</script>
-</body>
-</html>
+  
+  /** Example: hook up to a button with id="connectBtn" */
+  document.addEventListener("DOMContentLoaded", () => {
+    const btn = document.getElementById("connectBtn");
+    if (btn) btn.addEventListener("click", connectWalletAndEnsureLinea);
+  });
+  </script>
+  
