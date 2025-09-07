@@ -281,3 +281,23 @@ const provider = new ethers.JsonRpcProvider("https://rpc.linea.build");
 const balance = await provider.getBalance(walletAddress);
 document.getElementById("eth-balance").textContent =
     ethers.formatEther(balance) + " ETH";
+// === Fix for ethers v6 getBalance ===
+async function showInjectedBalance() {
+  try {
+    // Get connected address
+    const address = await injectedSigner.getAddress();
+
+    // Fetch balance from provider (not signer!)
+    const balance = await injectedProvider.getBalance(address);
+
+    // Convert to ETH
+    const eth = ethers.formatEther(balance);
+
+    // Display in console and UI (if you have a div with id="eth-balance")
+    console.log("ETH Balance:", eth);
+    const el = document.getElementById("eth-balance");
+    if (el) el.textContent = `${eth} ETH`;
+  } catch (err) {
+    console.error("Injected balance error:", err.message || err);
+  }
+}
